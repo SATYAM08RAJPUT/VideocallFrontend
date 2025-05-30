@@ -205,99 +205,140 @@
 // export default VideoCall;
 
 import React, { useEffect, useRef, useState } from "react";
-import { io } from "socket.io-client";
+import io from "socket.io-client";
 import { v4 as uuid } from "uuid";
 
-const socket = io("http://localhost:7007");
+const socket = io("https://videocallbackend-rjrw.onrender.com");
 
-const VideoCall = () => {
-  const localVideoRef = useRef(null);
+const roomId = "demo-room";
+const userId = uuid();
+
+function VideoCall() {
   const [peers, setPeers] = useState({});
-  const peerConnections = useRef({});
-  const [userId] = useState(uuid());
-  const roomId = "demo-room";
+  const localVideoRef = useRef();
+  const peersRef = useRef({});
+  const [stream, setStream] = useState(null);
 
   useEffect(() => {
-    // 1. Get local stream
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((stream) => {
-        localVideoRef.current.srcObject = stream;
+    async function init() {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      localVideoRef.current.srcObject = mediaStream;
+      setStream(mediaStream);
 
-        // 2. Join room
-        socket.emit("join-room", roomId, userId);
+      socket.emit("join-room", { roomId, userId });
 
-        // 3. Handle new user joining
-        socket.on("user-joined", (remoteId) => {
-          const peer = createPeer(remoteId, stream);
-          peerConnections.current[remoteId] = peer;
-        });
+      socket.on("user-joined", async (newUserId) => {
+        const pc = createPeerConnection(newUserId);
+        peersRef.current[newUserId] = pc;
 
-        // 4. Handle signal
-        socket.on("signal", async ({ from, data }) => {
-          let peer = peerConnections.current[from];
-          if (!peer) {
-            peer = createPeer(from, stream, false);
-            peerConnections.current[from] = peer;
-          }
-          await peer.signal(data);
-        });
-
-        // 5. Handle user left
-        socket.on("user-left", (id) => {
-          if (peers[id]) {
-            peers[id].srcObject?.getTracks().forEach((t) => t.stop());
-            delete peers[id];
-            setPeers({ ...peers });
-          }
-          if (peerConnections.current[id]) {
-            peerConnections.current[id].destroy();
-            delete peerConnections.current[id];
-          }
+        mediaStream.getTracks().forEach((track) => {
+          pc.addTrack(track, mediaStream);
         });
       });
+
+      socket.on("signal", async ({ from, data }) => {
+        let pc = peersRef.current[from];
+
+        if (!pc) {
+          pc = createPeerConnection(from);
+          peersRef.current[from] = pc;
+
+          stream.getTracks().forEach((track) => {
+            pc.addTrack(track, stream);
+          });
+        }
+
+        if (data.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(data));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit("signal", {
+            to: from,
+            from: userId,
+            data: pc.localDescription,
+          });
+        } else if (data.type === "answer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(data));
+        } else if (data.candidate) {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      });
+
+      socket.on("user-left", (id) => {
+        if (peersRef.current[id]) {
+          peersRef.current[id].close();
+          delete peersRef.current[id];
+          setPeers((prev) => {
+            const copy = { ...prev };
+            delete copy[id];
+            return copy;
+          });
+        }
+      });
+    }
+
+    init();
   }, []);
 
-  const createPeer = (remoteId, stream, initiator = true) => {
-    const Peer = require("simple-peer");
-    const peer = new Peer({
-      initiator,
-      trickle: false,
-      stream,
+  const createPeerConnection = (peerId) => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
-    peer.on("signal", (data) => {
-      socket.emit("signal", { to: remoteId, from: userId, data });
-    });
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("signal", {
+          to: peerId,
+          from: userId,
+          data: { candidate: event.candidate },
+        });
+      }
+    };
 
-    peer.on("stream", (remoteStream) => {
-      setPeers((prev) => ({
-        ...prev,
-        [remoteId]: createVideoElement(remoteId, remoteStream),
-      }));
-    });
+    pc.ontrack = (event) => {
+      setPeers((prev) => {
+        if (prev[peerId]) return prev; // already added
+        return { ...prev, [peerId]: event.streams[0] };
+      });
+    };
 
-    return peer;
-  };
+    pc.onnegotiationneeded = async () => {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("signal", {
+        to: peerId,
+        from: userId,
+        data: pc.localDescription,
+      });
+    };
 
-  const createVideoElement = (id, stream) => {
-    const video = document.createElement("video");
-    video.srcObject = stream;
-    video.autoplay = true;
-    video.playsInline = true;
-    video.id = id;
-    video.width = 200;
-    document.getElementById("videos").appendChild(video);
-    return video;
+    return pc;
   };
 
   return (
     <div>
       <h2>Multi-User WebRTC Room</h2>
-      <video ref={localVideoRef} autoPlay playsInline muted width="200" />
-      <div id="videos" />
+      <video ref={localVideoRef} autoPlay muted playsInline width="300" />
+      {Object.entries(peers).map(([id, stream]) => (
+        <Video key={id} stream={stream} />
+      ))}
     </div>
   );
-};
+}
+
+function Video({ stream }) {
+  const ref = useRef();
+
+  useEffect(() => {
+    if (ref.current && stream) {
+      ref.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return <video ref={ref} autoPlay playsInline width="300" />;
+}
 
 export default VideoCall;
