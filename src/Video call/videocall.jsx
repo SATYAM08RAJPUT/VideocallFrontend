@@ -1,5 +1,12 @@
 // import React, { useEffect, useRef, useState } from "react";
 // import { io } from "socket.io-client";
+// import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+// import {
+//   faMicrophone,
+//   faMicrophoneSlash,
+//   faVolumeUp,
+//   faVolumeMute,
+// } from "@fortawesome/free-solid-svg-icons";
 
 // const socket = io("https://videocallbackend-rjrw.onrender.com");
 // const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
@@ -9,11 +16,15 @@
 //   const remoteVideoRef = useRef(null);
 //   const peerConnection = useRef(null);
 //   const localStreamRef = useRef(null);
+
 //   const [roomId, setRoomId] = useState("");
 //   const [inCall, setInCall] = useState(false);
-
 //   const [isLocalMuted, setIsLocalMuted] = useState(false);
 //   const [isRemoteMuted, setIsRemoteMuted] = useState(false);
+
+//   const startCall = () => {
+//     socket.emit("join-room", roomId);
+//   };
 
 //   const toggleLocalMute = () => {
 //     if (localStreamRef.current) {
@@ -29,10 +40,6 @@
 //       remoteVideoRef.current.muted = !remoteVideoRef.current.muted;
 //       setIsRemoteMuted((prev) => !prev);
 //     }
-//   };
-
-//   const startCall = () => {
-//     socket.emit("join-room", roomId);
 //   };
 
 //   const createPeerConnection = () => {
@@ -76,12 +83,12 @@
 
 //     getLocalStream();
 
-//     socket.on("created", async () => {
+//     socket.on("created", () => {
 //       createPeerConnection();
 //       setInCall(true);
 //     });
 
-//     socket.on("joined", async () => {
+//     socket.on("joined", () => {
 //       createPeerConnection();
 //       socket.emit("ready", roomId);
 //       setInCall(true);
@@ -137,244 +144,160 @@
 //       </button>
 
 //       <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-//         <div>
+//         {/* Local Video */}
+//         <div style={{ position: "relative", width: 300 }}>
 //           <h4>📷 Your Video</h4>
 //           <video
 //             ref={localVideoRef}
 //             autoPlay
 //             playsInline
 //             muted
-//             style={{ width: 300 }}
+//             style={{ width: "100%" }}
 //           />
+//           <button
+//             onClick={toggleLocalMute}
+//             style={overlayButtonStyle}
+//             title={isLocalMuted ? "Unmute Mic" : "Mute Mic"}
+//           >
+//             <FontAwesomeIcon
+//               icon={isLocalMuted ? faMicrophoneSlash : faMicrophone}
+//               size="lg"
+//             />
+//           </button>
 //         </div>
-//         <div>
+
+//         {/* Remote Video */}
+//         <div style={{ position: "relative", width: 300 }}>
 //           <h4>🎥 Remote Video</h4>
 //           <video
 //             ref={remoteVideoRef}
 //             autoPlay
 //             playsInline
-//             style={{ width: 300 }}
+//             style={{ width: "100%" }}
 //           />
+//           <button
+//             onClick={toggleRemoteMute}
+//             style={overlayButtonStyle}
+//             title={isRemoteMuted ? "Unmute Remote" : "Mute Remote"}
+//           >
+//             <FontAwesomeIcon
+//               icon={isRemoteMuted ? faVolumeMute : faVolumeUp}
+//               size="lg"
+//             />
+//           </button>
 //         </div>
-//       </div>
-//       <div style={{ marginTop: 20 }}>
-//         <button onClick={toggleLocalMute}>
-//           {isLocalMuted ? "Unmute Mic 🎤" : "Mute Mic 🔇"}
-//         </button>
-//         <button onClick={toggleRemoteMute}>
-//           {isRemoteMuted ? "Unmute Remote 🔊" : "Mute Remote 🔈"}
-//         </button>
 //       </div>
 //     </div>
 //   );
 // }
+// const overlayButtonStyle = {
+//   position: "absolute",
+//   bottom: 10,
+//   right: 10,
+//   background: "rgba(0,0,0,0.6)",
+//   color: "#fff",
+//   border: "none",
+//   borderRadius: "50%",
+//   padding: "10px",
+//   cursor: "pointer",
+// };
 
 // export default VideoCall;
 
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import {
-  faMicrophone,
-  faMicrophoneSlash,
-  faVolumeUp,
-  faVolumeMute,
-} from "@fortawesome/free-solid-svg-icons";
+import { v4 as uuid } from "uuid";
 
-const socket = io("https://videocallbackend-rjrw.onrender.com");
-const servers = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+const socket = io("http://localhost:7007");
 
-function VideoCall() {
+const VideoCall = () => {
   const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const peerConnection = useRef(null);
-  const localStreamRef = useRef(null);
-
-  const [roomId, setRoomId] = useState("");
-  const [inCall, setInCall] = useState(false);
-  const [isLocalMuted, setIsLocalMuted] = useState(false);
-  const [isRemoteMuted, setIsRemoteMuted] = useState(false);
-
-  const startCall = () => {
-    socket.emit("join-room", roomId);
-  };
-
-  const toggleLocalMute = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = !track.enabled;
-      });
-      setIsLocalMuted((prev) => !prev);
-    }
-  };
-
-  const toggleRemoteMute = () => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.muted = !remoteVideoRef.current.muted;
-      setIsRemoteMuted((prev) => !prev);
-    }
-  };
-
-  const createPeerConnection = () => {
-    peerConnection.current = new RTCPeerConnection(servers);
-
-    peerConnection.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit("signal", {
-          roomId,
-          data: { candidate: event.candidate },
-        });
-      }
-    };
-
-    peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        peerConnection.current.addTrack(track, localStreamRef.current);
-      });
-    }
-  };
+  const [peers, setPeers] = useState({});
+  const peerConnections = useRef({});
+  const [userId] = useState(uuid());
+  const roomId = "demo-room";
 
   useEffect(() => {
-    const getLocalStream = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
-        localStreamRef.current = stream;
+    // 1. Get local stream
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
+      .then((stream) => {
         localVideoRef.current.srcObject = stream;
-      } catch (error) {
-        console.error("Error accessing media devices.", error);
-      }
-    };
 
-    getLocalStream();
+        // 2. Join room
+        socket.emit("join-room", roomId, userId);
 
-    socket.on("created", () => {
-      createPeerConnection();
-      setInCall(true);
+        // 3. Handle new user joining
+        socket.on("user-joined", (remoteId) => {
+          const peer = createPeer(remoteId, stream);
+          peerConnections.current[remoteId] = peer;
+        });
+
+        // 4. Handle signal
+        socket.on("signal", async ({ from, data }) => {
+          let peer = peerConnections.current[from];
+          if (!peer) {
+            peer = createPeer(from, stream, false);
+            peerConnections.current[from] = peer;
+          }
+          await peer.signal(data);
+        });
+
+        // 5. Handle user left
+        socket.on("user-left", (id) => {
+          if (peers[id]) {
+            peers[id].srcObject?.getTracks().forEach((t) => t.stop());
+            delete peers[id];
+            setPeers({ ...peers });
+          }
+          if (peerConnections.current[id]) {
+            peerConnections.current[id].destroy();
+            delete peerConnections.current[id];
+          }
+        });
+      });
+  }, []);
+
+  const createPeer = (remoteId, stream, initiator = true) => {
+    const Peer = require("simple-peer");
+    const peer = new Peer({
+      initiator,
+      trickle: false,
+      stream,
     });
 
-    socket.on("joined", () => {
-      createPeerConnection();
-      socket.emit("ready", roomId);
-      setInCall(true);
+    peer.on("signal", (data) => {
+      socket.emit("signal", { to: remoteId, from: userId, data });
     });
 
-    socket.on("ready", async () => {
-      const offer = await peerConnection.current.createOffer();
-      await peerConnection.current.setLocalDescription(offer);
-      socket.emit("signal", { roomId, data: { offer } });
+    peer.on("stream", (remoteStream) => {
+      setPeers((prev) => ({
+        ...prev,
+        [remoteId]: createVideoElement(remoteId, remoteStream),
+      }));
     });
 
-    socket.on("signal", async ({ data }) => {
-      if (data.offer) {
-        await peerConnection.current.setRemoteDescription(
-          new RTCSessionDescription(data.offer)
-        );
-        const answer = await peerConnection.current.createAnswer();
-        await peerConnection.current.setLocalDescription(answer);
-        socket.emit("signal", { roomId, data: { answer } });
-      } else if (data.answer) {
-        await peerConnection.current.setRemoteDescription(
-          new RTCSessionDescription(data.answer)
-        );
-      } else if (data.candidate) {
-        try {
-          await peerConnection.current.addIceCandidate(
-            new RTCIceCandidate(data.candidate)
-          );
-        } catch (err) {
-          console.error("ICE error", err);
-        }
-      }
-    });
+    return peer;
+  };
 
-    return () => {
-      socket.off("created");
-      socket.off("joined");
-      socket.off("ready");
-      socket.off("signal");
-    };
-  }, [roomId]);
+  const createVideoElement = (id, stream) => {
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.id = id;
+    video.width = 200;
+    document.getElementById("videos").appendChild(video);
+    return video;
+  };
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>🔵 WebRTC Video Call</h2>
-      <input
-        placeholder="Enter Room ID"
-        value={roomId}
-        onChange={(e) => setRoomId(e.target.value)}
-      />
-      <button onClick={startCall} disabled={inCall || !roomId}>
-        Join Call
-      </button>
-
-      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-        {/* Local Video */}
-        <div style={{ position: "relative", width: 300 }}>
-          <h4>📷 Your Video</h4>
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{ width: "100%" }}
-          />
-          <button
-            onClick={toggleLocalMute}
-            style={overlayButtonStyle}
-            title={isLocalMuted ? "Unmute Mic" : "Mute Mic"}
-          >
-            <FontAwesomeIcon
-              icon={isLocalMuted ? faMicrophoneSlash : faMicrophone}
-              size="lg"
-            />
-          </button>
-        </div>
-
-        {/* Remote Video */}
-        <div style={{ position: "relative", width: 300 }}>
-          <h4>🎥 Remote Video</h4>
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            style={{ width: "100%" }}
-          />
-          <button
-            onClick={toggleRemoteMute}
-            style={overlayButtonStyle}
-            title={isRemoteMuted ? "Unmute Remote" : "Mute Remote"}
-          >
-            <FontAwesomeIcon
-              icon={isRemoteMuted ? faVolumeMute : faVolumeUp}
-              size="lg"
-            />
-          </button>
-        </div>
-      </div>
+    <div>
+      <h2>Multi-User WebRTC Room</h2>
+      <video ref={localVideoRef} autoPlay playsInline muted width="200" />
+      <div id="videos" />
     </div>
   );
-}
-
-// 🔧 Shared style for overlay buttons
-const overlayButtonStyle = {
-  position: "absolute",
-  bottom: 10,
-  right: 10,
-  background: "rgba(0,0,0,0.6)",
-  color: "#fff",
-  border: "none",
-  borderRadius: "50%",
-  padding: "10px",
-  cursor: "pointer",
 };
 
 export default VideoCall;
