@@ -1,10 +1,23 @@
 import "./App.css";
 import VideoCall from "./Video call/videocall";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import { v4 as uuid } from "uuid";
 
 function App() {
   return (
     <>
-      <VideoCall />
+      <Router>
+        <Routes>
+          {" "}
+          <Route path="/" element={<Navigate to={`/room/${uuid()}`} />} />
+          <Route path="/room/:roomId" element={<VideoCall />} />
+        </Routes>
+      </Router>
     </>
   );
 }

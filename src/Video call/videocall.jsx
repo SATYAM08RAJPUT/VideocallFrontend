@@ -204,13 +204,14 @@
 
 // export default VideoCall;
 import React, { useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { v4 as uuid } from "uuid";
 
-const socket = io("https://videocallbackend-rjrw.onrender.com");
-const ROOM_ID = "my-room"; // You can make this dynamic if needed
+const socket = io("https://videocallbackend-rjrw.onrender.com"); // ✅ Your signaling server
 
 const VideoCall = () => {
+  const { roomId } = useParams(); // ✅ Dynamic room ID
   const localVideoRef = useRef(null);
   const [remoteStreams, setRemoteStreams] = useState({});
   const localStreamRef = useRef(null);
@@ -226,12 +227,15 @@ const VideoCall = () => {
       localStreamRef.current = stream;
       localVideoRef.current.srcObject = stream;
 
-      socket.emit("join-room", ROOM_ID, userId.current);
+      socket.emit("join-room", roomId, userId.current);
     };
 
     init();
 
+    // ✅ When someone else joins the room
     socket.on("user-joined", async (newUserId) => {
+      if (newUserId === userId.current) return;
+
       const pc = createPeerConnection(newUserId);
       peersRef.current[newUserId] = pc;
 
@@ -245,11 +249,14 @@ const VideoCall = () => {
       socket.emit("signal", {
         to: newUserId,
         from: userId.current,
-        data: { sdp: offer },
+        data: { sdp: pc.localDescription },
       });
     });
 
+    // ✅ When receiving SDP or ICE
     socket.on("signal", async ({ from, data }) => {
+      if (from === userId.current) return;
+
       let pc = peersRef.current[from];
       if (!pc) {
         pc = createPeerConnection(from);
@@ -270,7 +277,7 @@ const VideoCall = () => {
           socket.emit("signal", {
             to: from,
             from: userId.current,
-            data: { sdp: answer },
+            data: { sdp: pc.localDescription },
           });
         }
       }
@@ -278,21 +285,21 @@ const VideoCall = () => {
       if (data.candidate) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (e) {
-          console.error("Error adding ICE candidate", e);
+        } catch (err) {
+          console.error("ICE Candidate Error:", err);
         }
       }
     });
 
+    // ✅ Cleanup when someone leaves
     socket.on("user-left", (leftUserId) => {
-      const pc = peersRef.current[leftUserId];
-      if (pc) {
-        pc.close();
+      if (peersRef.current[leftUserId]) {
+        peersRef.current[leftUserId].close();
         delete peersRef.current[leftUserId];
         setRemoteStreams((prev) => {
-          const updated = { ...prev };
-          delete updated[leftUserId];
-          return updated;
+          const copy = { ...prev };
+          delete copy[leftUserId];
+          return copy;
         });
       }
     });
@@ -300,27 +307,27 @@ const VideoCall = () => {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [roomId]);
 
   const createPeerConnection = (peerId) => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
         socket.emit("signal", {
           to: peerId,
           from: userId.current,
-          data: { candidate: e.candidate },
+          data: { candidate: event.candidate },
         });
       }
     };
 
-    pc.ontrack = (e) => {
+    pc.ontrack = (event) => {
       setRemoteStreams((prev) => ({
         ...prev,
-        [peerId]: e.streams[0],
+        [peerId]: event.streams[0],
       }));
     };
 
@@ -329,7 +336,7 @@ const VideoCall = () => {
 
   return (
     <div style={{ padding: "10px" }}>
-      <h2>🧑‍🤝‍🧑 Multi-User Video Call Room</h2>
+      <h2>🔗 Room ID: {roomId}</h2>
       <video
         ref={localVideoRef}
         autoPlay
