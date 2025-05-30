@@ -207,7 +207,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { v4 as uuid } from "uuid";
 
-const socket = io("https://your-signaling-server.com"); // Replace with your backend URL
+const socket = io("https://videocallbackend-rjrw.onrender.com");
 
 const ROOM_ID = "my-multi-user-room";
 
