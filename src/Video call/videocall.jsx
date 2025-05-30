@@ -208,7 +208,7 @@ import { io } from "socket.io-client";
 import { v4 as uuid } from "uuid";
 
 const socket = io("https://videocallbackend-rjrw.onrender.com"); // 🔁 Change this to your backend URL
-const ROOM_ID = "abc"; // Static or generate dynamically if you want
+const ROOM_ID = prompt("Enter Room ID");
 
 const VideoCall = () => {
   const localVideoRef = useRef(null);
