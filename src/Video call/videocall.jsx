@@ -204,19 +204,25 @@
 
 // export default VideoCall;
 import React, { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { v4 as uuid } from "uuid";
 
-const socket = io("https://videocallbackend-rjrw.onrender.com"); // ✅ Your signaling server
+const socket = io("https://videocallbackend-rjrw.onrender.com"); // Replace with your backend
 
 const VideoCall = () => {
-  const { roomId } = useParams(); // ✅ Dynamic room ID
   const localVideoRef = useRef(null);
   const [remoteStreams, setRemoteStreams] = useState({});
   const localStreamRef = useRef(null);
   const peersRef = useRef({});
   const userId = useRef(uuid());
+
+  // Get or create roomId from URL
+  const urlParams = new URLSearchParams(window.location.search);
+  let roomId = urlParams.get("room");
+  if (!roomId) {
+    roomId = uuid(); // Create new room if not provided
+    window.location.search = `?room=${roomId}`; // redirect to room URL
+  }
 
   useEffect(() => {
     const init = async () => {
@@ -225,20 +231,21 @@ const VideoCall = () => {
         audio: true,
       });
       localStreamRef.current = stream;
-      localVideoRef.current.srcObject = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
       socket.emit("join-room", roomId, userId.current);
     };
 
     init();
 
-    // ✅ When someone else joins the room
+    // When a new user joins
     socket.on("user-joined", async (newUserId) => {
-      if (newUserId === userId.current) return;
-
       const pc = createPeerConnection(newUserId);
       peersRef.current[newUserId] = pc;
 
+      // Add local tracks BEFORE creating offer
       localStreamRef.current.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current);
       });
@@ -249,19 +256,18 @@ const VideoCall = () => {
       socket.emit("signal", {
         to: newUserId,
         from: userId.current,
-        data: { sdp: pc.localDescription },
+        data: { sdp: offer },
       });
     });
 
-    // ✅ When receiving SDP or ICE
+    // Handle incoming signal
     socket.on("signal", async ({ from, data }) => {
-      if (from === userId.current) return;
-
       let pc = peersRef.current[from];
       if (!pc) {
         pc = createPeerConnection(from);
         peersRef.current[from] = pc;
 
+        // Add local tracks BEFORE answer
         localStreamRef.current.getTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current);
         });
@@ -273,11 +279,10 @@ const VideoCall = () => {
         if (data.sdp.type === "offer") {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-
           socket.emit("signal", {
             to: from,
             from: userId.current,
-            data: { sdp: pc.localDescription },
+            data: { sdp: answer },
           });
         }
       }
@@ -286,20 +291,20 @@ const VideoCall = () => {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
         } catch (err) {
-          console.error("ICE Candidate Error:", err);
+          console.error("ICE candidate error:", err);
         }
       }
     });
 
-    // ✅ Cleanup when someone leaves
     socket.on("user-left", (leftUserId) => {
-      if (peersRef.current[leftUserId]) {
-        peersRef.current[leftUserId].close();
+      const pc = peersRef.current[leftUserId];
+      if (pc) {
+        pc.close();
         delete peersRef.current[leftUserId];
         setRemoteStreams((prev) => {
-          const copy = { ...prev };
-          delete copy[leftUserId];
-          return copy;
+          const updated = { ...prev };
+          delete updated[leftUserId];
+          return updated;
         });
       }
     });
@@ -325,9 +330,11 @@ const VideoCall = () => {
     };
 
     pc.ontrack = (event) => {
+      console.log("Track received from:", peerId);
+      const [stream] = event.streams;
       setRemoteStreams((prev) => ({
         ...prev,
-        [peerId]: event.streams[0],
+        [peerId]: stream,
       }));
     };
 
@@ -336,7 +343,10 @@ const VideoCall = () => {
 
   return (
     <div style={{ padding: "10px" }}>
-      <h2>🔗 Room ID: {roomId}</h2>
+      <h2>🧑‍🤝‍🧑 Multi-User Video Call Room</h2>
+      <p>
+        <strong>Room ID:</strong> {roomId}
+      </p>
       <video
         ref={localVideoRef}
         autoPlay
