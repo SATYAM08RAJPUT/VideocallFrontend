@@ -204,19 +204,18 @@
 
 // export default VideoCall;
 import React, { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
 import { io } from "socket.io-client";
 import { v4 as uuid } from "uuid";
 
-const socket = io("https://videocallbackend-rjrw.onrender.com"); // Or your server
-const userId = uuid();
+const socket = io("https://videocallbackend-rjrw.onrender.com"); // 🔁 Change this to your backend URL
+const ROOM_ID = "abc"; // Static or generate dynamically if you want
 
 const VideoCall = () => {
-  const { roomId } = useParams();
   const localVideoRef = useRef(null);
-  const [remoteStreams, setRemoteStreams] = useState({});
   const localStreamRef = useRef(null);
+  const [remoteStreams, setRemoteStreams] = useState({});
   const peersRef = useRef({});
+  const userId = useRef(uuid());
 
   useEffect(() => {
     const init = async () => {
@@ -225,28 +224,41 @@ const VideoCall = () => {
         audio: true,
       });
       localStreamRef.current = stream;
-      localVideoRef.current.srcObject = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
-      socket.emit("join-room", roomId, userId);
+      socket.emit("join-room", { roomId: ROOM_ID, userId: userId.current });
     };
 
     init();
 
-    socket.on("user-joined", async (newUserId) => {
-      const pc = createPeerConnection(newUserId);
-      peersRef.current[newUserId] = pc;
+    socket.on("all-users", (users) => {
+      users.forEach(({ userId: remoteUserId, socketId }) => {
+        const pc = createPeerConnection(socketId);
+        peersRef.current[socketId] = pc;
+
+        localStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current);
+        });
+
+        pc.createOffer().then((offer) => {
+          pc.setLocalDescription(offer);
+          socket.emit("signal", {
+            to: socketId,
+            from: userId.current,
+            data: { sdp: offer },
+          });
+        });
+      });
+    });
+
+    socket.on("user-joined", ({ userId: remoteUserId, socketId }) => {
+      const pc = createPeerConnection(socketId);
+      peersRef.current[socketId] = pc;
 
       localStreamRef.current.getTracks().forEach((track) => {
         pc.addTrack(track, localStreamRef.current);
-      });
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      socket.emit("signal", {
-        to: newUserId,
-        from: userId,
-        data: { sdp: offer },
       });
     });
 
@@ -267,10 +279,9 @@ const VideoCall = () => {
         if (data.sdp.type === "offer") {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-
           socket.emit("signal", {
             to: from,
-            from: userId,
+            from: userId.current,
             data: { sdp: answer },
           });
         }
@@ -301,9 +312,9 @@ const VideoCall = () => {
     return () => {
       socket.disconnect();
     };
-  }, [roomId]);
+  }, []);
 
-  const createPeerConnection = (peerId) => {
+  const createPeerConnection = (peerSocketId) => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
@@ -311,17 +322,17 @@ const VideoCall = () => {
     pc.onicecandidate = (e) => {
       if (e.candidate) {
         socket.emit("signal", {
-          to: peerId,
-          from: userId,
+          to: peerSocketId,
+          from: userId.current,
           data: { candidate: e.candidate },
         });
       }
     };
 
-    pc.ontrack = (e) => {
+    pc.ontrack = (event) => {
       setRemoteStreams((prev) => ({
         ...prev,
-        [peerId]: e.streams[0],
+        [peerSocketId]: event.streams[0],
       }));
     };
 
@@ -330,22 +341,24 @@ const VideoCall = () => {
 
   return (
     <div style={{ padding: "10px" }}>
-      <h2>📞 Room: {roomId}</h2>
+      <h2>🧑‍🤝‍🧑 Multi-User Video Call</h2>
+
       <video
         ref={localVideoRef}
         autoPlay
         muted
         playsInline
-        width={200}
-        style={{ border: "2px solid green", marginBottom: "10px" }}
+        width={250}
+        style={{ border: "3px solid green", marginBottom: "10px" }}
       />
+
       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-        {Object.entries(remoteStreams).map(([id, stream]) => (
+        {Object.entries(remoteStreams).map(([socketId, stream]) => (
           <video
-            key={id}
+            key={socketId}
             autoPlay
             playsInline
-            width={200}
+            width={250}
             ref={(video) => {
               if (video) video.srcObject = stream;
             }}
