@@ -208,14 +208,13 @@ import { io } from "socket.io-client";
 import { v4 as uuid } from "uuid";
 
 const socket = io("https://videocallbackend-rjrw.onrender.com");
-
-const ROOM_ID = "my-multi-user-room";
+const ROOM_ID = "my-room"; // You can make this dynamic if needed
 
 const VideoCall = () => {
   const localVideoRef = useRef(null);
   const [remoteStreams, setRemoteStreams] = useState({});
-  const localStreamRef = useRef();
-  const peersRef = useRef({}); // userId -> RTCPeerConnection
+  const localStreamRef = useRef(null);
+  const peersRef = useRef({});
   const userId = useRef(uuid());
 
   useEffect(() => {
@@ -267,6 +266,7 @@ const VideoCall = () => {
         if (data.sdp.type === "offer") {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
+
           socket.emit("signal", {
             to: from,
             from: userId.current,
@@ -278,8 +278,8 @@ const VideoCall = () => {
       if (data.candidate) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (err) {
-          console.error("Error adding ICE candidate", err);
+        } catch (e) {
+          console.error("Error adding ICE candidate", e);
         }
       }
     });
@@ -328,10 +328,17 @@ const VideoCall = () => {
   };
 
   return (
-    <div>
-      <h2>Multi-User WebRTC Room</h2>
-      <video ref={localVideoRef} autoPlay muted playsInline width={200} />
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+    <div style={{ padding: "10px" }}>
+      <h2>🧑‍🤝‍🧑 Multi-User Video Call Room</h2>
+      <video
+        ref={localVideoRef}
+        autoPlay
+        muted
+        playsInline
+        width={200}
+        style={{ border: "2px solid green", marginBottom: "10px" }}
+      />
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
         {Object.entries(remoteStreams).map(([id, stream]) => (
           <video
             key={id}
@@ -341,6 +348,7 @@ const VideoCall = () => {
             ref={(video) => {
               if (video) video.srcObject = stream;
             }}
+            style={{ border: "2px solid blue" }}
           />
         ))}
       </div>
