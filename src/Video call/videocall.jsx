@@ -205,15 +205,18 @@
 // export default VideoCall;
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import { v4 as uuid } from "uuid";
 
-const socket = io("https://videocallbackend-rjrw.onrender.com"); // 🔁 Use your deployed backend
-const ROOM_ID = prompt("Enter Room ID");
+const socket = io("https://videocallbackend-rjrw.onrender.com"); // your backend
+
+const ROOM_ID = "classroom-101"; // static room (or make dynamic)
 
 const VideoCall = () => {
   const localVideoRef = useRef(null);
   const localStreamRef = useRef(null);
   const peersRef = useRef({});
   const [remoteStreams, setRemoteStreams] = useState({});
+  const userId = useRef(uuid());
 
   useEffect(() => {
     const init = async () => {
@@ -227,107 +230,110 @@ const VideoCall = () => {
         localVideoRef.current.srcObject = stream;
       }
 
-      socket.on("connect", () => {
-        socket.emit("join-room", {
-          roomId: ROOM_ID,
-          userId: socket.id,
-        });
-      });
-
-      socket.on("all-users", (users) => {
-        users.forEach((remoteSocketId) => {
-          const pc = createPeerConnection(remoteSocketId);
-          peersRef.current[remoteSocketId] = pc;
-
-          stream.getTracks().forEach((track) => {
-            pc.addTrack(track, stream);
-          });
-
-          pc.createOffer().then((offer) => {
-            pc.setLocalDescription(offer);
-            socket.emit("signal", {
-              to: remoteSocketId,
-              from: socket.id,
-              data: { sdp: offer },
-            });
-          });
-        });
-      });
-
-      socket.on("user-joined", ({ socketId: remoteSocketId }) => {
-        const pc = createPeerConnection(remoteSocketId);
-        peersRef.current[remoteSocketId] = pc;
-
-        stream.getTracks().forEach((track) => {
-          pc.addTrack(track, stream);
-        });
-      });
-
-      socket.on("signal", async ({ from, data }) => {
-        let pc = peersRef.current[from];
-        if (!pc) {
-          pc = createPeerConnection(from);
-          peersRef.current[from] = pc;
-
-          stream.getTracks().forEach((track) => {
-            pc.addTrack(track, stream);
-          });
-        }
-
-        if (data.sdp) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          if (data.sdp.type === "offer") {
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socket.emit("signal", {
-              to: from,
-              from: socket.id,
-              data: { sdp: answer },
-            });
-          }
-        }
-
-        if (data.candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch (err) {
-            console.error("ICE error", err);
-          }
-        }
-      });
-
-      socket.on("user-left", (leftId) => {
-        const pc = peersRef.current[leftId];
-        if (pc) {
-          pc.close();
-          delete peersRef.current[leftId];
-          setRemoteStreams((prev) => {
-            const updated = { ...prev };
-            delete updated[leftId];
-            return updated;
-          });
-        }
+      socket.emit("join-room", {
+        roomId: ROOM_ID,
+        userId: userId.current,
       });
     };
 
     init();
+
+    // 1. Receive list of users already in the room
+    socket.on("all-users", (users) => {
+      users.forEach(({ userId: remoteUserId, socketId }) => {
+        const pc = createPeerConnection(socketId);
+        peersRef.current[socketId] = pc;
+
+        localStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current);
+        });
+
+        pc.createOffer().then((offer) => {
+          pc.setLocalDescription(offer);
+          socket.emit("signal", {
+            to: socketId,
+            from: socket.id,
+            data: { sdp: offer },
+          });
+        });
+      });
+    });
+
+    // 2. A new user joined after you
+    socket.on("user-joined", ({ userId: remoteUserId, socketId }) => {
+      const pc = createPeerConnection(socketId);
+      peersRef.current[socketId] = pc;
+
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current);
+      });
+    });
+
+    // 3. Handle signal (SDP or ICE)
+    socket.on("signal", async ({ from, data }) => {
+      let pc = peersRef.current[from];
+      if (!pc) {
+        pc = createPeerConnection(from);
+        peersRef.current[from] = pc;
+
+        localStreamRef.current.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current);
+        });
+      }
+
+      if (data.sdp) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        if (data.sdp.type === "offer") {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit("signal", {
+            to: from,
+            from: socket.id,
+            data: { sdp: answer },
+          });
+        }
+      }
+
+      if (data.candidate) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (err) {
+          console.error("Error adding ICE candidate", err);
+        }
+      }
+    });
+
+    // 4. Handle user left
+    socket.on("user-left", (leftUserId) => {
+      const pc = peersRef.current[leftUserId];
+      if (pc) {
+        pc.close();
+        delete peersRef.current[leftUserId];
+        setRemoteStreams((prev) => {
+          const updated = { ...prev };
+          delete updated[leftUserId];
+          return updated;
+        });
+      }
+    });
 
     return () => {
       socket.disconnect();
     };
   }, []);
 
+  // Peer connection setup
   const createPeerConnection = (peerSocketId) => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
         socket.emit("signal", {
           to: peerSocketId,
           from: socket.id,
-          data: { candidate: e.candidate },
+          data: { candidate: event.candidate },
         });
       }
     };
@@ -343,26 +349,26 @@ const VideoCall = () => {
   };
 
   return (
-    <div>
-      <h2>🔴 Video Call</h2>
+    <div style={{ padding: "10px" }}>
+      <h2>📹 Classroom Video Call</h2>
       <video
         ref={localVideoRef}
         autoPlay
         muted
         playsInline
         width={250}
-        style={{ border: "3px solid green" }}
+        style={{ border: "3px solid green", marginBottom: "10px" }}
       />
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
         {Object.entries(remoteStreams).map(([id, stream]) => (
           <video
             key={id}
             autoPlay
             playsInline
+            width={250}
             ref={(video) => {
               if (video) video.srcObject = stream;
             }}
-            width={250}
             style={{ border: "2px solid blue" }}
           />
         ))}
