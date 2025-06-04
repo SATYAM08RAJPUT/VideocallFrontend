@@ -206,8 +206,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("https://videocallbackend-rjrw.onrender.com");
-
+const socket = io("https://videocallbackend-rjrw.onrender.com"); // 🔁 Use your deployed backend
 const ROOM_ID = prompt("Enter Room ID");
 
 const VideoCall = () => {
@@ -215,7 +214,6 @@ const VideoCall = () => {
   const localStreamRef = useRef(null);
   const peersRef = useRef({});
   const [remoteStreams, setRemoteStreams] = useState({});
-  const socketIdRef = useRef(null);
 
   useEffect(() => {
     const init = async () => {
@@ -229,18 +227,13 @@ const VideoCall = () => {
         localVideoRef.current.srcObject = stream;
       }
 
-      // Get own socket ID
       socket.on("connect", () => {
-        socketIdRef.current = socket.id;
-
-        // Join room with socket ID
         socket.emit("join-room", {
           roomId: ROOM_ID,
           userId: socket.id,
         });
       });
 
-      // Create connections to existing users
       socket.on("all-users", (users) => {
         users.forEach((remoteSocketId) => {
           const pc = createPeerConnection(remoteSocketId);
@@ -261,8 +254,7 @@ const VideoCall = () => {
         });
       });
 
-      // When new user joins
-      socket.on("user-joined", (remoteSocketId) => {
+      socket.on("user-joined", ({ socketId: remoteSocketId }) => {
         const pc = createPeerConnection(remoteSocketId);
         peersRef.current[remoteSocketId] = pc;
 
@@ -271,7 +263,6 @@ const VideoCall = () => {
         });
       });
 
-      // Receiving signal (offer/answer/ICE)
       socket.on("signal", async ({ from, data }) => {
         let pc = peersRef.current[from];
         if (!pc) {
@@ -352,15 +343,15 @@ const VideoCall = () => {
   };
 
   return (
-    <div style={{ padding: "10px" }}>
-      <h2>🧑‍🤝‍🧑 Multi-User Video Call</h2>
+    <div>
+      <h2>🔴 Video Call</h2>
       <video
         ref={localVideoRef}
         autoPlay
         muted
         playsInline
         width={250}
-        style={{ border: "3px solid green", marginBottom: "10px" }}
+        style={{ border: "3px solid green" }}
       />
       <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
         {Object.entries(remoteStreams).map(([id, stream]) => (
